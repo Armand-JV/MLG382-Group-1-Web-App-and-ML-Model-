@@ -180,6 +180,9 @@ This project follows the **CRISP-DM** framework:
 ├── reports/
 │   ├── figures/
 │   └── technical_report.pdf
+├── documentation/
+│   ├── domain_understanding.docx
+│   └──example.doxc
 ├── requirements.txt
 ├── README.md
 └── .gitignore
