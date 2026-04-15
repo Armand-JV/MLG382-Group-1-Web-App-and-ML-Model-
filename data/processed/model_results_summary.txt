@@ -1,0 +1,35 @@
+
+=== MODEL RESULTS SUMMARY ===
+Decision Tree  : Acc=0.7945  ROC=0.8108  Log-Loss=0.7192
+Random Forest  : Acc=0.9143  ROC=0.9009  Log-Loss=0.3145
+XGBoost (Tuned): Acc=0.9151  ROC=0.9308  Log-Loss=0.2725
+
+Best Model: XGBoost (Accuracy=0.9151, ROC-AUC=0.9308)
+
+Random Forest Classification Report:
+              precision    recall  f1-score   support
+
+ Gestational       0.00      0.00      0.00        53
+ No Diabetes       0.85      1.00      0.92      1548
+Pre-Diabetes       0.82      1.00      0.90      6203
+      Type 1       0.00      0.00      0.00        23
+      Type 2       0.99      0.87      0.93     11633
+
+    accuracy                           0.91     19460
+   macro avg       0.53      0.57      0.55     19460
+weighted avg       0.92      0.91      0.91     19460
+
+
+XGBoost Classification Report:
+              precision    recall  f1-score   support
+
+ Gestational       0.00      0.00      0.00        53
+ No Diabetes       0.84      1.00      0.91      1548
+Pre-Diabetes       0.82      1.00      0.90      6203
+      Type 1       0.00      0.00      0.00        23
+      Type 2       1.00      0.87      0.93     11633
+
+    accuracy                           0.92     19460
+   macro avg       0.53      0.57      0.55     19460
+weighted avg       0.93      0.92      0.91     19460
+
