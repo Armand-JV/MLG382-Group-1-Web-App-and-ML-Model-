@@ -33,7 +33,8 @@ Make sure your directory is set to MLG382-Group-1-Web-App-and-ML-Model-\app>
 
 So run:
 
-cd app 
+cd app
+
 python app.py
 
 Then go to the url: http://127.0.0.1:8050/
