@@ -27,6 +27,17 @@ This project was developed for the **BC Analytics** health-tech case study using
 - [Contact](#contact)
 
 ---
+## How to run.
+Use the any terminal (in VScode or not doesn't matter)
+Make sure your directory is set to MLG382-Group-1-Web-App-and-ML-Model-\app> 
+
+So run:
+
+cd app 
+python app.py
+
+Then go to the url: http://127.0.0.1:8050/
+---
 
 ## Project Overview
 
