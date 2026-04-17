@@ -328,20 +328,32 @@ def register_callbacks(app):
             ])
 
         try:
-            input_data  = _build_full_input(vals)
+            input_data   = _build_full_input(vals)
             input_scaled = preprocessor.transform(input_data)
-            prediction = xgb_model.predict(input_scaled)[0]
-            proba = xgb_model.predict_proba(input_scaled)[0]
+            prediction   = xgb_model.predict(input_scaled)[0]
+            proba        = xgb_model.predict_proba(input_scaled)[0]
 
             cluster = kmeans_model.predict(input_scaled)[0] if kmeans_model else "N/A"
 
-            is_high = prediction == 1
-            risk_pct = proba[1] * 100
-            conf_pct = risk_pct if is_high else proba[0] * 100
+            # Decode predicted class and compute risk correctly for 2- or 3-class models.
+            # sklearn LabelEncoder sorts alphabetically:
+            #   2-class: No Diabetes=0, Type 2=1
+            #   3-class: No Diabetes=0, Pre-Diabetes=1, Type 2=2
+            # In both cases class 0 = healthy, any class > 0 = elevated risk.
+            if label_encoder is not None:
+                predicted_label = label_encoder.inverse_transform([prediction])[0]
+            else:
+                predicted_label = str(prediction)
+
+            is_high  = int(prediction) > 0
+            # "Diabetes probability" = probability of NOT being in the healthy class
+            risk_pct = (1.0 - float(proba[0])) * 100
+            # Confidence = how sure the model is about the specific predicted class
+            conf_pct = float(proba[int(prediction)]) * 100
 
             bar_color = C["red"] if is_high else C["teal"]
             icon  = "🔴" if is_high else "🟢"
-            label = "HIGH RISK" if is_high else "LOW RISK"
+            label = predicted_label   # e.g. "Type 2", "Pre-Diabetes", "No Diabetes"
 
             return html.Div([
                 # Risk badge
@@ -380,7 +392,7 @@ def register_callbacks(app):
                     dbc.Col([
                         html.Small("Risk Score", style={"color": C["slate"], "fontSize": "11px",
                                                          "fontWeight": "700", "textTransform": "uppercase"}),
-                        html.Div(f"{proba[1]:.3f}", style={"color": C["navy"], "fontWeight": "800",
+                        html.Div(f"{risk_pct/100:.3f}", style={"color": C["navy"], "fontWeight": "800",
                                                             "fontSize": "20px"}),
                     ], style={"textAlign": "center"}),
                     dbc.Col([
@@ -490,7 +502,8 @@ def register_callbacks(app):
             explainer  = shap.TreeExplainer(xgb_model)
             shap_vals  = explainer.shap_values(input_scaled)
             base_val   = explainer.expected_value
-            pred_val   = xgb_model.predict_proba(input_scaled)[0][1]
+            # P(not healthy) = 1 - P(No Diabetes / class 0) — correct for 2 or 3 classes
+            pred_val   = 1.0 - float(xgb_model.predict_proba(input_scaled)[0][0])
 
             rows = sorted(zip(FEATURE_NAMES, shap_vals[0]), key=lambda x: abs(x[1]), reverse=True)
 
