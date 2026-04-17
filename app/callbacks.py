@@ -1,285 +1,503 @@
-from dash import Input, Output, State, callback_context
+# TASK 6.2 & 6.3 – Diabetes Risk Dashboard Callbacks
+# Handles: ML predictions, all visualisations, clustering insights
+import sys
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(BASE_DIR, "src"))
+
+from dash import Input, Output, State
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
-import pickle
-import joblib
 from dash import html
 import dash_bootstrap_components as dbc
+import joblib
+import pickle
+import warnings
+warnings.filterwarnings("ignore")
 
-# ── Load data & models ────────────────────────────────────────────────────────
-df = pd.read_csv("../data/processed/clustered_data.csv")
-cluster_summary = pd.read_csv("../data/processed/cluster_summary.csv")
+# Colour palette (mirrors layout) 
+C ={
+    "navy":  "#0066FF",
+    "teal":  "#1A9E8F",
+    "red":   "#E84855",
+    "amber": "#F5A623",
+    "slate": "#4A5568",
+    "light": "#F7FAFC",
+    "white": "#FFFFFF",
+}
 
+CLUSTER_COLORS = ["#1A9E8F", "#F5A623", "#E84855", "#5A67D8", "#68D391"]
+PLOT_LAYOUT = dict(
+    plot_bgcolor="rgba(247,250,252,1)",
+    paper_bgcolor="rgba(255,255,255,0)",
+    font=dict(family="Nunito Sans, sans-serif", color="#4A5568"),
+    margin=dict(l=20, r=20, t=40, b=20),
+)
+
+# Load data 
 try:
-    feature_names = pd.read_csv("../data/processed/feature_names.csv")["feature"].tolist()
+    df = pd.read_csv(os.path.join(BASE_DIR, "data/processed/clustered_data.csv"))
 except Exception:
-    feature_names = []
+    # Fallback: empty dataframe so dashboard still loads
+    df = pd.DataFrame(columns=[
+        "cluster", "diabetes_stage", "diagnosed_diabetes",
+        "diabetes_risk_score", "age", "bmi", "glucose_fasting",
+        "glucose_postprandial", "systolic_bp", "diastolic_bp",
+        "cholesterol_total", "hba1c", "physical_activity_minutes_per_week",
+    ])
 
+# Load models 
 try:
-    with open("../artifacts/random_forest_best_model.pkl", "rb") as f:
-        rf_model = pickle.load(f)
-except Exception:
-    rf_model = None
+    import traceback
+    xgb_model     = pickle.load(open(os.path.join(BASE_DIR, "artifacts/xgboost_best_model.pkl"), "rb"))
+    preprocessor  = joblib.load(os.path.join(BASE_DIR, "data/processed/preprocessor.joblib"))
+    label_encoder = joblib.load(os.path.join(BASE_DIR, "data/processed/label_encoder.joblib"))
+    kmeans_model  = joblib.load(os.path.join(BASE_DIR, "artifacts/kmeans_model.joblib"))
+except Exception as e:
+    print(f"[callbacks] Model load error: {e}")
+    xgb_model = preprocessor = label_encoder = kmeans_model = None
 
-try:
-    with open("../artifacts/xgboost_best_model.pkl", "rb") as f:
-        xgb_model = pickle.load(f)
-except Exception:
-    xgb_model = None
-
-try:
-    preprocessor = joblib.load("../artifacts/preprocessor.pkl")
-except Exception:
-    preprocessor = None
-
-try:
-    label_encoder = pickle.load(open("../artifacts/label_encoder.pkl", "rb"))
-except Exception:
-    label_encoder = None
-
-# Colour palette per cluster
-CLUSTER_COLORS = {0: "#3b82f6", 1: "#f59e0b", 2: "#ef4444"}
-CLUSTER_LABELS = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
-
-PLOT_TEMPLATE = "plotly_white"
-
-
-def _filter_df(cluster_val):
-    if cluster_val == "all" or cluster_val is None:
-        return df
-    return df[df["cluster"] == int(cluster_val)]
+FEATURE_NAMES = [
+    "Age", "BMI", "Glucose (Fasting)", "Glucose (Postprandial)",
+    "Systolic BP", "Diastolic BP", "Cholesterol", "HbA1c", "Physical Activity",
+]
+INPUT_COLS = [
+    "age", "bmi", "glucose_fasting", "glucose_postprandial",
+    "systolic_bp", "diastolic_bp", "cholesterol_total",
+    "hba1c", "physical_activity_minutes_per_week",
+]
 
 
 def register_callbacks(app):
 
-    # ── KPIs ─────────────────────────────────────────────────────────────────
+    
+    # TAB 1 – OVERVIEW: stat cards
+    
     @app.callback(
-        Output("kpi-total",    "children"),
-        Output("kpi-highrisk", "children"),
-        Output("kpi-avgbmi",   "children"),
-        Output("kpi-avggluc",  "children"),
+        [Output("metric-total-patients", "children"),
+         Output("metric-diabetes-cases", "children"),
+         Output("metric-avg-risk",       "children"),
+         Output("metric-clusters",       "children")],
         Input("cluster-filter", "value"),
     )
-    def update_kpis(cluster_val):
-        d = _filter_df(cluster_val)
-        total     = f"{len(d):,}"
-        high_risk = f"{(d['cluster'] == 2).sum():,}" if "cluster" in d.columns else "—"
-        avg_bmi   = f"{d['bmi'].mean():.1f}" if "bmi" in d.columns else "—"
-        avg_gluc  = f"{d['glucose_fasting'].mean():.0f} mg/dL" if "glucose_fasting" in d.columns else "—"
-        return total, high_risk, avg_bmi, avg_gluc
+    def update_metrics(cluster_filter):
+        fdf = df if cluster_filter == "all" else df[df["cluster"] == cluster_filter]
+        total    = len(fdf)
+        cases    = int(fdf["diagnosed_diabetes"].sum()) if "diagnosed_diabetes" in fdf.columns else 0
+        avg_risk = round(fdf["diabetes_risk_score"].mean(), 2) if "diabetes_risk_score" in fdf.columns else 0
+        n_clust  = fdf["cluster"].nunique() if "cluster" in fdf.columns else 0
+        return total, cases, avg_risk, n_clust
 
-    # ── Main feature chart ────────────────────────────────────────────────────
+    # Cluster dropdown refresh 
+    @app.callback(
+        Output("cluster-filter", "options"),
+        Input("diabetes-stage-filter", "value"),
+    )
+    def update_cluster_options(stage_filter):
+        fdf = df if stage_filter == "all" else df[df["diabetes_stage"] == stage_filter]
+        opts = [{"label": "All Clusters", "value": "all"}]
+        opts += [{"label": f"Cluster {int(c)}", "value": c}
+                 for c in sorted(fdf["cluster"].unique())]
+        return opts
+
+    # Feature distribution chart
     @app.callback(
         Output("main-graph", "figure"),
-        Input("feature-dropdown", "value"),
-        Input("chart-type",       "value"),
-        Input("cluster-filter",   "value"),
+        [Input("feature-dropdown",      "value"),
+         Input("chart-type-dropdown",   "value"),
+         Input("cluster-filter",        "value"),
+         Input("diabetes-stage-filter", "value")],
     )
-    def update_main_graph(feature, chart_type, cluster_val):
-        d = _filter_df(cluster_val)
-        if feature not in d.columns:
-            return {}
+    def update_main_graph(feature, chart_type, cluster_filter, stage_filter):
+        fdf = df.copy()
+        if stage_filter != "all":
+            fdf = fdf[fdf["diabetes_stage"] == stage_filter]
+        if cluster_filter != "all":
+            fdf = fdf[fdf["cluster"] == cluster_filter]
+        if feature not in fdf.columns:
+            return go.Figure()
 
-        color_map = {str(k): v for k, v in CLUSTER_COLORS.items()}
-        d = d.copy()
-        d["cluster_label"] = d["cluster"].map(CLUSTER_LABELS)
-
-        kwargs = dict(
-            data_frame=d, color="cluster_label",
-            color_discrete_map={v: CLUSTER_COLORS[k] for k, v in CLUSTER_LABELS.items()},
-            template=PLOT_TEMPLATE,
-            labels={"cluster_label": "Cluster"},
-        )
+        label = feature.replace("_", " ").title()
+        color_seq = CLUSTER_COLORS
 
         if chart_type == "histogram":
-            fig = px.histogram(**kwargs, x=feature, barmode="overlay", opacity=0.75)
+            fig = px.histogram(fdf, x=feature, color="cluster", nbins=30,
+                               title=f"Distribution of {label}",
+                               color_discrete_sequence=color_seq, barmode="overlay", opacity=0.7)
         elif chart_type == "box":
-            fig = px.box(**kwargs, x="cluster_label", y=feature)
-        elif chart_type == "scatter":
-            fig = px.scatter(**kwargs, x=feature, y="cluster_label", opacity=0.5)
-        elif chart_type == "violin":
-            fig = px.violin(**kwargs, x="cluster_label", y=feature, box=True)
+            fig = px.box(fdf, x="cluster", y=feature,
+                         title=f"{label} by Cluster",
+                         color="cluster", color_discrete_sequence=color_seq)
         else:
-            fig = px.histogram(**kwargs, x=feature)
+            fig = px.scatter(fdf, x=feature, y="diabetes_risk_score",
+                             color="cluster", title=f"{label} vs Risk Score",
+                             color_discrete_sequence=color_seq, opacity=0.6)
 
-        fig.update_layout(
-            margin=dict(l=10, r=10, t=30, b=10),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor="white",
-        )
+        fig.update_layout(**PLOT_LAYOUT, hovermode="x unified")
         return fig
 
-    # ── Cluster pie ───────────────────────────────────────────────────────────
+    # Risk score distribution
     @app.callback(
-        Output("cluster-pie", "figure"),
+        Output("risk-score-graph", "figure"),
+        [Input("cluster-filter", "value"), Input("diabetes-stage-filter", "value")],
+    )
+    def update_risk_score_graph(cluster_filter, stage_filter):
+        fdf = df.copy()
+        if stage_filter != "all":
+            fdf = fdf[fdf["diabetes_stage"] == stage_filter]
+        if cluster_filter != "all":
+            fdf = fdf[fdf["cluster"] == cluster_filter]
+
+        fig = px.histogram(fdf, x="diabetes_risk_score", color="diabetes_stage",
+                           nbins=25, title="Risk Score Distribution by Stage",
+                           color_discrete_map={"No Diabetes": C["teal"], "Type 2": C["red"]},
+                           barmode="overlay", opacity=0.75)
+        fig.update_layout(**PLOT_LAYOUT)
+        return fig
+
+    # Cluster composition donut 
+    @app.callback(
+        Output("cluster-composition-graph", "figure"),
+        Input("diabetes-stage-filter", "value"),
+    )
+    def update_cluster_composition(stage_filter):
+        fdf = df if stage_filter == "all" else df[df["diabetes_stage"] == stage_filter]
+        counts = fdf["cluster"].value_counts().sort_index()
+        fig = px.pie(values=counts.values,
+                     names=[f"Cluster {int(i)}" for i in counts.index],
+                     title="Patient Distribution across Clusters",
+                     hole=0.45,
+                     color_discrete_sequence=CLUSTER_COLORS)
+        fig.update_traces(textinfo="label+percent", pull=[0.03] * len(counts))
+        fig.update_layout(**PLOT_LAYOUT)
+        return fig
+
+    # Diabetes stage bar
+    @app.callback(
+        Output("diabetes-stage-graph", "figure"),
         Input("cluster-filter", "value"),
     )
-    def update_pie(cluster_val):
-        d = _filter_df(cluster_val)
-        counts = d["cluster"].value_counts().reset_index()
-        counts.columns = ["cluster", "count"]
-        counts["label"] = counts["cluster"].map(CLUSTER_LABELS)
-        fig = px.pie(
-            counts, names="label", values="count",
-            color="label",
-            color_discrete_map={v: CLUSTER_COLORS[k] for k, v in CLUSTER_LABELS.items()},
-            template=PLOT_TEMPLATE, hole=0.45,
-        )
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10),
-                          legend=dict(orientation="h", yanchor="top", y=-0.1))
+    def update_diabetes_stage_graph(cluster_filter):
+        fdf = df if cluster_filter == "all" else df[df["cluster"] == cluster_filter]
+        counts = fdf["diabetes_stage"].value_counts()
+        fig = px.bar(x=counts.index, y=counts.values,
+                     title="Diabetes Stage Distribution",
+                     labels={"x": "Stage", "y": "Count"},
+                     color=counts.index,
+                     color_discrete_map={"No Diabetes": C["teal"], "Type 2": C["red"]})
+        fig.update_layout(**PLOT_LAYOUT, showlegend=False)
         return fig
 
-    # ── Diabetes stage bar ────────────────────────────────────────────────────
-    @app.callback(
-        Output("stage-bar", "figure"),
-        Input("cluster-filter", "value"),
-    )
-    def update_stage_bar(cluster_val):
-        d = _filter_df(cluster_val)
-        if "diabetes_stage" not in d.columns or "cluster" not in d.columns:
-            return {}
-        grp = d.groupby(["cluster", "diabetes_stage"]).size().reset_index(name="count")
-        grp["cluster_label"] = grp["cluster"].map(CLUSTER_LABELS)
-        fig = px.bar(
-            grp, x="cluster_label", y="count", color="diabetes_stage",
-            barmode="stack", template=PLOT_TEMPLATE,
-            labels={"cluster_label": "Cluster", "count": "Patients", "diabetes_stage": "Stage"},
-        )
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10),
-                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        return fig
-
-    # ── Scatter explorer ──────────────────────────────────────────────────────
-    @app.callback(
-        Output("scatter-plot", "figure"),
-        Input("scatter-x",      "value"),
-        Input("scatter-y",      "value"),
-        Input("cluster-filter", "value"),
-    )
-    def update_scatter(x_feat, y_feat, cluster_val):
-        d = _filter_df(cluster_val).copy()
-        if x_feat not in d.columns or y_feat not in d.columns:
-            return {}
-        d["cluster_label"] = d["cluster"].map(CLUSTER_LABELS)
-        fig = px.scatter(
-            d, x=x_feat, y=y_feat, color="cluster_label",
-            color_discrete_map={v: CLUSTER_COLORS[k] for k, v in CLUSTER_LABELS.items()},
-            opacity=0.6, template=PLOT_TEMPLATE,
-            labels={"cluster_label": "Cluster"},
-            trendline="ols",
-        )
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10),
-                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        return fig
-
-    # ── Prediction ────────────────────────────────────────────────────────────
+    
+    # TAB 2 – PREDICTIONS
+    
     @app.callback(
         Output("prediction-output", "children"),
-        Input("predict-btn", "n_clicks"),
-        State("input-age",      "value"),
-        State("input-bmi",      "value"),
-        State("input-glucose",  "value"),
-        State("input-hba1c",    "value"),
-        State("input-activity", "value"),
-        State("input-stress",   "value"),
-        State("model-selector", "value"),
+        Input("predict-button", "n_clicks"),
+        [State("input-age",                "value"),
+         State("input-bmi",                "value"),
+         State("input-glucose-fasting",    "value"),
+         State("input-glucose-postprandial","value"),
+         State("input-systolic-bp",        "value"),
+         State("input-diastolic-bp",       "value"),
+         State("input-cholesterol",        "value"),
+         State("input-hba1c",             "value"),
+         State("input-activity",          "value")],
         prevent_initial_call=True,
     )
-    def run_prediction(n_clicks, age, bmi, glucose, hba1c, activity, stress, model_choice):
-        model = rf_model if model_choice == "rf" else xgb_model
-        model_name = "Random Forest" if model_choice == "rf" else "XGBoost"
+    def predict_risk(n_clicks, age, bmi, glucose_fasting, glucose_postprandial,
+                     systolic_bp, diastolic_bp, cholesterol, hba1c, activity):
 
-        if model is None:
-            return dbc.Alert("Model not loaded. Check artifacts directory.", color="warning")
+        vals = [age, bmi, glucose_fasting, glucose_postprandial,
+                systolic_bp, diastolic_bp, cholesterol, hba1c, activity]
 
-        # Build input row matching training feature order
-        input_dict = {
-            "age": age, "bmi": bmi,
-            "glucose_fasting": glucose, "hba1c": hba1c,
-            "physical_activity_hours_per_week": activity,
-            "stress_level": stress,
-        }
-        X_input = pd.DataFrame([input_dict])
+        if not all(v is not None for v in vals):
+            return html.Div([
+                html.Div("⚠️", style={"fontSize": "40px", "textAlign": "center"}),
+                html.P("Please fill in all fields before predicting.",
+                       style={"color": C["amber"], "textAlign": "center",
+                              "fontWeight": "600", "marginTop": "10px"}),
+            ])
 
-        # Apply preprocessor if available
-        if preprocessor is not None:
-            try:
-                X_input = preprocessor.transform(X_input)
-            except Exception:
-                pass
+        if xgb_model is None:
+            return html.Div([
+                html.P("❌ Model not loaded. Please check server logs.",
+                       style={"color": C["red"], "textAlign": "center", "fontWeight": "600"}),
+            ])
 
         try:
-            pred = model.predict(X_input)[0]
-            proba = model.predict_proba(X_input)[0]
+            input_data = pd.DataFrame([dict(zip(INPUT_COLS, vals))])
+            input_scaled = preprocessor.transform(input_data)
+            prediction = xgb_model.predict(input_scaled)[0]
+            proba = xgb_model.predict_proba(input_scaled)[0]
 
-            if label_encoder is not None:
-                try:
-                    pred_label = label_encoder.inverse_transform([pred])[0]
-                except Exception:
-                    pred_label = str(pred)
-            else:
-                pred_label = str(pred)
+            cluster = kmeans_model.predict(input_scaled)[0] if kmeans_model else "N/A"
 
-            # Risk colour
-            if "high" in str(pred_label).lower() or pred == 2:
-                color, icon = "danger", "🔴"
-            elif "moderate" in str(pred_label).lower() or pred == 1:
-                color, icon = "warning", "🟡"
-            else:
-                color, icon = "success", "🟢"
+            is_high = prediction == 1
+            risk_pct = proba[1] * 100
+            conf_pct = risk_pct if is_high else proba[0] * 100
 
-            proba_bars = []
-            classes = label_encoder.classes_ if label_encoder else [str(i) for i in range(len(proba))]
-            for cls, p in zip(classes, proba):
-                proba_bars.append(
-                    html.Div([
-                        html.Div([
-                            html.Span(cls, style={"fontSize": "0.8rem", "color": "#475569", "width": "120px", "display": "inline-block"}),
-                            dbc.Progress(value=round(p * 100, 1), label=f"{p*100:.1f}%",
-                                         color="primary", style={"height": "18px", "flex": 1}),
-                        ], style={"display": "flex", "alignItems": "center", "gap": "10px", "marginBottom": "6px"})
-                    ])
-                )
+            bar_color = C["red"] if is_high else C["teal"]
+            icon  = "🔴" if is_high else "🟢"
+            label = "HIGH RISK" if is_high else "LOW RISK"
 
-            return dbc.Alert([
-                html.H5(f"{icon} Predicted Stage: {pred_label}", className="alert-heading"),
-                html.P(f"Model: {model_name}", className="mb-2 text-muted", style={"fontSize": "0.85rem"}),
-                html.Hr(),
-                html.P("Class probabilities:", className="mb-2 fw-semibold", style={"fontSize": "0.85rem"}),
-                *proba_bars,
-            ], color=color, style={"borderRadius": "10px"})
+            return html.Div([
+                # Risk badge
+                html.Div([
+                    html.Span(icon, style={"fontSize": "48px"}),
+                    html.H4(label, style={"color": bar_color, "fontWeight": "800",
+                                          "margin": "8px 0 4px",
+                                          "fontFamily": "Nunito Sans, sans-serif"}),
+                    html.P(f"Diabetes Probability: {risk_pct:.1f}%",
+                           style={"color": C["slate"], "fontWeight": "600", "margin": "0"}),
+                ], style={"textAlign": "center", "padding": "16px 0 12px"}),
+
+                # Confidence bar
+                html.Div([
+                    html.Div(style={
+                        "height": "10px", "borderRadius": "6px",
+                        "background": f"linear-gradient(90deg, {bar_color} {risk_pct:.0f}%, #E2E8F0 {risk_pct:.0f}%)",
+                    }),
+                    dbc.Row([
+                        dbc.Col(html.Small("0%", style={"color": "#A0AEC0", "fontSize": "11px"})),
+                        dbc.Col(html.Small("100%", style={"color": "#A0AEC0", "fontSize": "11px",
+                                                           "textAlign": "right"})),
+                    ]),
+                ], style={"margin": "0 16px 12px"}),
+
+                html.Hr(style={"margin": "8px 16px"}),
+
+                # Stats row
+                dbc.Row([
+                    dbc.Col([
+                        html.Small("Confidence", style={"color": C["slate"], "fontSize": "11px",
+                                                         "fontWeight": "700", "textTransform": "uppercase"}),
+                        html.Div(f"{conf_pct:.1f}%", style={"color": C["navy"], "fontWeight": "800",
+                                                              "fontSize": "20px"}),
+                    ], style={"textAlign": "center"}),
+                    dbc.Col([
+                        html.Small("Risk Score", style={"color": C["slate"], "fontSize": "11px",
+                                                         "fontWeight": "700", "textTransform": "uppercase"}),
+                        html.Div(f"{proba[1]:.3f}", style={"color": C["navy"], "fontWeight": "800",
+                                                            "fontSize": "20px"}),
+                    ], style={"textAlign": "center"}),
+                    dbc.Col([
+                        html.Small("Cluster", style={"color": C["slate"], "fontSize": "11px",
+                                                      "fontWeight": "700", "textTransform": "uppercase"}),
+                        html.Div(str(cluster), style={"color": C["navy"], "fontWeight": "800",
+                                                       "fontSize": "20px"}),
+                    ], style={"textAlign": "center"}),
+                ], style={"padding": "8px 16px 16px"}),
+            ])
 
         except Exception as e:
-            return dbc.Alert(f"Prediction error: {str(e)}", color="danger")
+            return html.Div([
+                html.P(f"❌ Prediction error: {str(e)}",
+                       style={"color": C["red"], "fontWeight": "600", "textAlign": "center"}),
+            ])
 
-    # ── Cluster summary table ─────────────────────────────────────────────────
+    # Feature importance char
     @app.callback(
-        Output("cluster-table", "children"),
-        Input("cluster-filter", "value"),
+        Output("feature-importance-graph", "figure"),
+        Input("predict-button", "n_clicks"),
+        prevent_initial_call=True,
     )
-    def update_cluster_table(cluster_val):
+    def update_feature_importance(n_clicks):
+        if xgb_model is None:
+            fig = go.Figure()
+            fig.add_annotation(text="Model not loaded", showarrow=False)
+            return fig
         try:
-            d = cluster_summary.copy()
-        except Exception:
-            # Build a live summary if CSV not loaded
-            d = _filter_df(cluster_val).copy()
-            if "cluster" not in d.columns:
-                return html.P("No cluster data available.")
-            numeric_cols = d.select_dtypes(include=np.number).columns.tolist()
-            d = d.groupby("cluster")[numeric_cols].mean().round(2).reset_index()
+            imp = xgb_model.feature_importances_
+            imp_df = pd.DataFrame({"Feature": FEATURE_NAMES, "Importance": imp}).sort_values("Importance")
+            fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
+                         title="XGBoost Feature Importance",
+                         color="Importance",
+                         color_continuous_scale=[[0, "#A8D5CF"], [1, C["teal"]]])
+            fig.update_coloraxes(showscale=False)
+            fig.update_layout(**PLOT_LAYOUT, height=320)
+            return fig
+        except Exception as e:
+            fig = go.Figure()
+            fig.add_annotation(text=f"Error: {e}", showarrow=False)
+            return fig
 
-        if cluster_val != "all":
-            d = d[d["cluster"] == int(cluster_val)] if "cluster" in d.columns else d
+    # SHAP summary placeholder 
+    @app.callback(
+        Output("shap-summary", "children"),
+        Input("predict-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def update_shap_summary(n_clicks):
+        return html.Div([
+            html.H6("SHAP Summary", style={"color": C["navy"], "fontWeight": "700"}),
+            html.P("SHAP (SHapley Additive Explanations) quantifies each feature's "
+                   "contribution to the model's prediction for this patient.",
+                   style={"color": C["slate"], "fontSize": "13px"}),
+            html.P("Positive SHAP → increases risk probability.",
+                   style={"color": C["red"], "fontSize": "13px", "fontWeight": "600"}),
+            html.P("Negative SHAP → decreases risk probability.",
+                   style={"color": C["teal"], "fontSize": "13px", "fontWeight": "600"}),
+        ], style={"padding": "8px"})
 
-        header = [html.Th(c, style={"fontWeight": "600", "fontSize": "0.8rem", "color": "#475569"}) for c in d.columns]
-        rows = []
-        for _, row in d.iterrows():
-            rows.append(html.Tr([html.Td(str(v), style={"fontSize": "0.82rem"}) for v in row]))
+    # SHAP force plot
+    @app.callback(
+        Output("shap-force-plot", "children"),
+        Input("predict-button", "n_clicks"),
+        [State("input-age",                "value"),
+         State("input-bmi",                "value"),
+         State("input-glucose-fasting",    "value"),
+         State("input-glucose-postprandial","value"),
+         State("input-systolic-bp",        "value"),
+         State("input-diastolic-bp",       "value"),
+         State("input-cholesterol",        "value"),
+         State("input-hba1c",             "value"),
+         State("input-activity",          "value")],
+        prevent_initial_call=True,
+    )
+    def update_shap_force(n_clicks, age, bmi, glucose_fasting, glucose_postprandial,
+                          systolic_bp, diastolic_bp, cholesterol, hba1c, activity):
+        vals = [age, bmi, glucose_fasting, glucose_postprandial,
+                systolic_bp, diastolic_bp, cholesterol, hba1c, activity]
+        if not all(v is not None for v in vals):
+            return html.P("Complete all fields to see SHAP analysis.",
+                          style={"color": C["slate"], "textAlign": "center", "fontSize": "13px"})
+        if xgb_model is None or preprocessor is None:
+            return html.P("Model not loaded.", style={"color": C["red"], "textAlign": "center"})
 
-        return dbc.Table(
-            [html.Thead(html.Tr(header)), html.Tbody(rows)],
-            bordered=False, striped=True, hover=True, responsive=True,
-            style={"fontSize": "0.85rem"},
-        )
+        try:
+            import shap
+            input_data = pd.DataFrame([dict(zip(INPUT_COLS, vals))])
+            input_scaled = preprocessor.transform(input_data)
+            explainer  = shap.TreeExplainer(xgb_model)
+            shap_vals  = explainer.shap_values(input_scaled)
+            base_val   = explainer.expected_value
+            pred_val   = xgb_model.predict_proba(input_scaled)[0][1]
+
+            rows = sorted(zip(FEATURE_NAMES, shap_vals[0]), key=lambda x: abs(x[1]), reverse=True)
+
+            bars = []
+            for fname, sv in rows:
+                color = C["red"] if sv > 0 else C["teal"]
+                pct   = min(abs(sv) * 600, 100)
+                bars.append(html.Div([
+                    html.Div(fname, style={"fontSize": "12px", "color": C["slate"],
+                                           "fontWeight": "600", "marginBottom": "2px"}),
+                    html.Div([
+                        html.Div(style={"width": f"{pct:.0f}%", "height": "8px",
+                                        "background": color, "borderRadius": "4px"}),
+                    ], style={"background": "#E2E8F0", "borderRadius": "4px",
+                               "marginBottom": "2px"}),
+                    html.Div(f"{sv:+.4f}", style={"fontSize": "11px", "color": color,
+                                                   "fontWeight": "700"}),
+                ], style={"marginBottom": "10px"}))
+
+            return html.Div([
+                html.Div([
+                    html.Span(f"Base: {base_val:.2f}",
+                              style={"fontSize": "12px", "color": C["slate"], "marginRight": "16px"}),
+                    html.Span(f"Prediction: {pred_val:.3f}",
+                              style={"fontSize": "12px", "color": C["navy"], "fontWeight": "700"}),
+                ], style={"marginBottom": "14px"}),
+                *bars,
+            ], style={"padding": "4px"})
+
+        except Exception as e:
+            return html.Div([
+                html.P(f"SHAP: {str(e)}", style={"color": C["slate"], "fontSize": "12px"}),
+            ])
+
+    
+    # TAB 3 – CLUSTERING
+    
+    @app.callback(
+        Output("cluster-scatter-graph", "figure"),
+        Input("main-tabs", "value"),
+    )
+    def update_cluster_scatter(tab):
+        if df.empty:
+            return go.Figure()
+        try:
+            x_col = "glucose_fasting" if "glucose_fasting" in df.columns else df.columns[0]
+            y_col = "bmi"             if "bmi"             in df.columns else df.columns[1]
+            fig = px.scatter(
+                df, x=x_col, y=y_col, color=df["cluster"].astype(str),
+                title="K-Means Cluster Visualisation (Glucose vs BMI)",
+                labels={x_col: "Glucose (Fasting)", y_col: "BMI"},
+                color_discrete_sequence=CLUSTER_COLORS,
+                opacity=0.65, size_max=6,
+            )
+            fig.update_traces(marker=dict(size=5))
+            fig.update_layout(**PLOT_LAYOUT, legend_title="Cluster")
+            return fig
+        except Exception as e:
+            fig = go.Figure()
+            fig.add_annotation(text=f"Error: {e}", showarrow=False)
+            return fig
+
+    @app.callback(
+        Output("cluster-profiles", "children"),
+        Input("main-tabs", "value"),
+    )
+    def update_cluster_profiles(tab):
+        if df.empty:
+            return html.P("No data available.", style={"color": C["slate"]})
+
+        profiles = []
+        cluster_descs = {
+            0: ("Low Risk",    C["teal"],  "Younger patients with healthy BMI, normal glucose and high activity."),
+            1: ("Medium Risk", C["amber"], "Middle-aged with borderline glucose and moderate BMI; sedentary lifestyle."),
+            2: ("High Risk",   C["red"],   "Older patients with elevated glucose, high BMI and HbA1c — most diabetic cases."),
+        }
+
+        for c in sorted(df["cluster"].unique()):
+            ci = int(c)
+            label, color, desc = cluster_descs.get(ci, (f"Cluster {ci}", C["navy"], ""))
+            n = len(df[df["cluster"] == c])
+            profiles.append(html.Div([
+                html.Div([
+                    html.Span(f"Cluster {ci}", style={"fontWeight": "800", "color": color,
+                                                       "fontSize": "14px", "marginRight": "8px"}),
+                    dbc.Badge(label, pill=True,
+                              style={"background": color, "color": "#fff", "fontSize": "11px"}),
+                ], style={"marginBottom": "4px"}),
+                html.P(desc, style={"color": C["slate"], "fontSize": "12px", "marginBottom": "4px"}),
+                html.Small(f"n = {n} patients", style={"color": "#A0AEC0"}),
+                html.Hr(style={"margin": "10px 0"}),
+            ]))
+
+        return html.Div(profiles, style={"padding": "4px"})
+
+    @app.callback(
+        Output("cluster-heatmap", "figure"),
+        Input("main-tabs", "value"),
+    )
+    def update_cluster_heatmap(tab):
+        if df.empty:
+            return go.Figure()
+        try:
+            feat_cols = [c for c in INPUT_COLS if c in df.columns]
+            cluster_means = df.groupby("cluster")[feat_cols].mean()
+            # Normalise 0-1 per feature for readability
+            normed = (cluster_means - cluster_means.min()) / (cluster_means.max() - cluster_means.min() + 1e-9)
+            nice_names = [c.replace("_", " ").title() for c in feat_cols]
+
+            fig = go.Figure(data=go.Heatmap(
+                z=normed.values,
+                x=nice_names,
+                y=[f"Cluster {int(i)}" for i in cluster_means.index],
+                colorscale=[[0, "#EDF2F7"], [0.5, "#A8D5CF"], [1, C["navy"]]],
+                text=[[f"{v:.2f}" for v in row] for row in cluster_means.values],
+                texttemplate="%{text}",
+                hoverongaps=False,
+            ))
+            fig.update_layout(**PLOT_LAYOUT, title="Mean Feature Values per Cluster (normalised)",
+                              height=220, xaxis_tickangle=-30)
+            return fig
+        except Exception as e:
+            fig = go.Figure()
+            fig.add_annotation(text=f"Error: {e}", showarrow=False)
+            return fig

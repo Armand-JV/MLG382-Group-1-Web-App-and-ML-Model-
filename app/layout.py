@@ -1,298 +1,631 @@
+# TASK 6.1: Diabetes Risk Dashboard - Enhanced Multi-Tab Layout
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-SIDEBAR_STYLE = {
-    "position": "fixed",
-    "top": 0,
-    "left": 0,
-    "bottom": 0,
-    "width": "260px",
-    "padding": "2rem 1rem",
-    "backgroundColor": "#0f172a",
-    "color": "white",
-    "overflowY": "auto",
-    "zIndex": 1000,
+# Colour palette 
+C = {
+    "navy":   "#0066FF",
+    "teal":   "#1A9E8F",
+    "red":    "#E84855",
+    "amber":  "#F5A623",
+    "slate":  "#4A5568",
+    "light":  "#F7FAFC",
+    "white":  "#FFFFFF",
+    "border": "#E2E8F0",
 }
 
-CONTENT_STYLE = {
-    "marginLeft": "270px",
-    "padding": "2rem",
-    "backgroundColor": "#f8fafc",
-    "minHeight": "100vh",
+# Shared style helpers
+CARD = {
+    "borderRadius": "14px",
+    "boxShadow": "0 2px 12px rgba(13,43,69,.10)",
+    "border": f"1px solid {C['border']}",
+    "background": C["white"],
 }
 
-CARD_STYLE = {
-    "borderRadius": "12px",
+HEADER_STYLE = {
+    "background": f"linear-gradient(135deg, {C['navy']} 0%, #0044CC 100%)",
+    "padding": "28px 40px 24px",
+    "borderBottom": f"3px solid {C['teal']}",
+    "marginBottom": "0",
+}
+
+TAB_STYLE = {
+    "fontFamily": "'Nunito Sans', sans-serif",
+    "fontWeight": "600",
+    "fontSize": "14px",
+    "color": C["slate"],
+    "background": "#EDF2F7",
     "border": "none",
-    "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
+    "borderBottom": f"2px solid {C['border']}",
+    "padding": "12px 24px",
 }
-
-NAV_LINK_STYLE = {
-    "color": "#94a3b8",
-    "padding": "10px 14px",
-    "borderRadius": "8px",
-    "marginBottom": "4px",
-    "cursor": "pointer",
-    "display": "block",
-    "textDecoration": "none",
-    "fontWeight": "500",
-    "transition": "all 0.2s",
+TAB_SELECTED = {
+    **TAB_STYLE,
+    "color": C["teal"],
+    "background": C["white"],
+    "borderBottom": f"3px solid {C['teal']}",
 }
 
 
-def stat_card(title, value_id, icon, color):
-    return dbc.Card([
-        dbc.CardBody([
-            html.Div([
+# Helper: stat card
+def stat_card(title, metric_id, color, icon):
+    return dbc.Col(
+        dbc.Card([
+            dbc.CardBody([
                 html.Div([
-                    html.P(title, className="text-muted mb-1",
-                           style={"fontSize": "0.78rem", "fontWeight": "600", "letterSpacing": "0.05em", "textTransform": "uppercase"}),
-                    html.H3(id=value_id, className="mb-0 fw-bold", style={"color": "#0f172a"}),
-                ]),
-                html.Div(icon, style={
-                    "width": "48px", "height": "48px", "borderRadius": "12px",
-                    "backgroundColor": color, "display": "flex",
-                    "alignItems": "center", "justifyContent": "center",
-                    "fontSize": "22px"
-                })
-            ], style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"})
-        ])
-    ], style=CARD_STYLE)
+                    html.Span(icon, style={"fontSize": "28px"}),
+                    html.Div([
+                        html.P(title, className="mb-0",
+                               style={"fontSize": "11px", "fontWeight": "700",
+                                      "letterSpacing": "1px", "textTransform": "uppercase",
+                                      "color": C["slate"]}),
+                        html.H3(id=metric_id, children="—",
+                                style={"color": color, "fontWeight": "800",
+                                       "margin": "0", "fontFamily": "'Nunito Sans', sans-serif"}),
+                    ], style={"marginLeft": "14px"}),
+                ], style={"display": "flex", "alignItems": "center"}),
+            ])
+        ], style={**CARD, "borderLeft": f"4px solid {color}"}),
+        xs=12, sm=6, lg=3, className="mb-3"
+    )
 
 
-def create_layout():
-    sidebar = html.Div([
+# Helper: section heading 
+def section_heading(text, sub=None):
+    children = [html.H5(text, style={"color": C["navy"], "fontWeight": "700",
+                                      "marginBottom": "2px", "fontFamily": "'Nunito Sans', sans-serif"})]
+    if sub:
+        children.append(html.P(sub, style={"color": C["slate"], "fontSize": "13px", "marginBottom": "0"}))
+    return html.Div(children, className="mb-3")
+
+
+# Helper: labelled input
+def labelled_input(label, input_id, placeholder, min_val, max_val,
+                   step=1, tooltip_text=None, unit=""):
+    tip = []
+    if tooltip_text:
+        tip = [
+            html.Span(" ⓘ", id=f"tip-{input_id}", style={"color": C["teal"], "cursor": "pointer", "fontSize": "13px"}),
+            dbc.Tooltip(tooltip_text, target=f"tip-{input_id}", placement="top"),
+        ]
+    return dbc.Col([
+        html.Label([label, *tip], className="fw-semibold mb-1",
+                   style={"fontSize": "13px", "color": C["slate"]}),
+        dbc.InputGroup([
+            dcc.Input(
+                id=input_id,
+                type="number",
+                placeholder=placeholder,
+                min=min_val,
+                max=max_val,
+                step=step,
+                debounce=True,
+                style={"borderRadius": "8px", "border": f"1px solid {C['border']}",
+                       "padding": "8px 12px", "fontSize": "14px", "width": "100%",
+                       "outline": "none"},
+            ),
+            *([ dbc.InputGroupText(unit, style={"fontSize": "12px", "color": C["slate"],
+                                                 "background": "#EDF2F7", "border": f"1px solid {C['border']}"}) ] if unit else []),
+        ], style={"borderRadius": "8px"}),
+    ], xs=12, sm=6, lg=4, className="mb-3")
+
+
+#  TAB 1: Overview / ML Insights 
+def overview_tab():
+    return dbc.Tab(label="📊 ML Insights", tab_id="tab-overview",
+                   label_style=TAB_STYLE, active_label_style=TAB_SELECTED,
+                   children=[
         html.Div([
-            html.Div("🩺", style={"fontSize": "28px", "marginBottom": "6px"}),
-            html.H5("DiabetesIQ", className="fw-bold mb-0", style={"color": "white"}),
-            html.P("Decision Support System", style={"color": "#64748b", "fontSize": "0.75rem"}),
-        ], className="mb-4 pb-3", style={"borderBottom": "1px solid #1e293b"}),
+            # Stat cards
+            dbc.Row([
+                stat_card("Total Patients",    "metric-total-patients", C["teal"],  "👥"),
+                stat_card("Diabetes Cases",    "metric-diabetes-cases", C["red"],   "🩸"),
+                stat_card("Avg Risk Score",    "metric-avg-risk",       C["amber"], "⚠️"),
+                stat_card("Patient Clusters",  "metric-clusters",       C["navy"],  "🔵"),
+            ], className="mb-2"),
 
-        html.P("NAVIGATION", style={"color": "#475569", "fontSize": "0.65rem",
-                                     "letterSpacing": "0.1em", "fontWeight": "700", "marginBottom": "8px"}),
+            # Filters row
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Cluster", className="fw-semibold mb-1",
+                                       style={"fontSize": "12px", "color": C["slate"]}),
+                            dcc.Dropdown(id="cluster-filter",
+                                         options=[{"label": "All Clusters", "value": "all"}],
+                                         value="all", clearable=False,
+                                         style={"fontSize": "13px"}),
+                        ], xs=12, sm=6, lg=3),
+                        dbc.Col([
+                            html.Label("Risk Stage", className="fw-semibold mb-1",
+                                       style={"fontSize": "12px", "color": C["slate"]}),
+                            dcc.Dropdown(id="diabetes-stage-filter",
+                                         options=[
+                                             {"label": "All Stages",  "value": "all"},
+                                             {"label": "No Diabetes", "value": "No Diabetes"},
+                                             {"label": "Type 2",      "value": "Type 2"},
+                                         ],
+                                         value="all", clearable=False,
+                                         style={"fontSize": "13px"}),
+                        ], xs=12, sm=6, lg=3),
+                        dbc.Col([
+                            html.Label("Feature", className="fw-semibold mb-1",
+                                       style={"fontSize": "12px", "color": C["slate"]}),
+                            dcc.Dropdown(id="feature-dropdown",
+                                         options=[
+                                             {"label": "Age",                   "value": "age"},
+                                             {"label": "BMI",                   "value": "bmi"},
+                                             {"label": "Glucose (Fasting)",     "value": "glucose_fasting"},
+                                             {"label": "Glucose (Postprandial)","value": "glucose_postprandial"},
+                                             {"label": "Systolic BP",           "value": "systolic_bp"},
+                                             {"label": "Diastolic BP",          "value": "diastolic_bp"},
+                                             {"label": "Cholesterol",           "value": "cholesterol_total"},
+                                             {"label": "HbA1c",                 "value": "hba1c"},
+                                             {"label": "Physical Activity",     "value": "physical_activity_minutes_per_week"},
+                                         ],
+                                         value="age", clearable=False,
+                                         style={"fontSize": "13px"}),
+                        ], xs=12, sm=6, lg=3),
+                        dbc.Col([
+                            html.Label("Chart Type", className="fw-semibold mb-1",
+                                       style={"fontSize": "12px", "color": C["slate"]}),
+                            dcc.Dropdown(id="chart-type-dropdown",
+                                         options=[
+                                             {"label": "Histogram", "value": "histogram"},
+                                             {"label": "Box Plot",  "value": "box"},
+                                             {"label": "Scatter",   "value": "scatter"},
+                                         ],
+                                         value="histogram", clearable=False,
+                                         style={"fontSize": "13px"}),
+                        ], xs=12, sm=6, lg=3),
+                    ])
+                ])
+            ], style={**CARD, "marginBottom": "20px"}),
 
-        html.Div([
-            html.A("📊  Overview", id="nav-overview", href="#", style=NAV_LINK_STYLE),
-            html.A("🔬  Patient Segmentation", id="nav-cluster", href="#", style=NAV_LINK_STYLE),
-            html.A("🤖  Risk Prediction", id="nav-predict", href="#", style=NAV_LINK_STYLE),
-            html.A("📈  Model Performance", id="nav-model", href="#", style=NAV_LINK_STYLE),
-            html.A("💡  SHAP Explainability", id="nav-shap", href="#", style=NAV_LINK_STYLE),
-        ]),
-
-        html.Hr(style={"borderColor": "#1e293b", "margin": "1.5rem 0"}),
-
-        html.P("DATA FILTERS", style={"color": "#475569", "fontSize": "0.65rem",
-                                       "letterSpacing": "0.1em", "fontWeight": "700", "marginBottom": "10px"}),
-
-        html.Label("Cluster Filter", style={"color": "#94a3b8", "fontSize": "0.8rem"}),
-        dcc.Dropdown(
-            id="cluster-filter",
-            options=[
-                {"label": "All Clusters", "value": "all"},
-                {"label": "Cluster 0 — Low Risk", "value": 0},
-                {"label": "Cluster 1 — Moderate Risk", "value": 1},
-                {"label": "Cluster 2 — High Risk", "value": 2},
-            ],
-            value="all",
-            clearable=False,
-            style={"marginBottom": "12px", "fontSize": "0.85rem"},
-        ),
-
-        html.Label("Feature (X-Axis)", style={"color": "#94a3b8", "fontSize": "0.8rem"}),
-        dcc.Dropdown(
-            id="feature-dropdown",
-            options=[
-                {"label": "Age", "value": "age"},
-                {"label": "BMI", "value": "bmi"},
-                {"label": "Fasting Glucose", "value": "glucose_fasting"},
-                {"label": "Postprandial Glucose", "value": "glucose_postprandial"},
-                {"label": "HbA1c", "value": "hba1c"},
-                {"label": "Physical Activity", "value": "physical_activity_hours_per_week"},
-                {"label": "Sleep Hours", "value": "sleep_hours_per_night"},
-                {"label": "Stress Level", "value": "stress_level"},
-            ],
-            value="bmi",
-            clearable=False,
-            style={"marginBottom": "12px", "fontSize": "0.85rem"},
-        ),
-
-        html.Label("Chart Type", style={"color": "#94a3b8", "fontSize": "0.8rem"}),
-        dcc.RadioItems(
-            id="chart-type",
-            options=[
-                {"label": " Histogram", "value": "histogram"},
-                {"label": " Box Plot", "value": "box"},
-                {"label": " Scatter", "value": "scatter"},
-                {"label": " Violin", "value": "violin"},
-            ],
-            value="histogram",
-            labelStyle={"display": "block", "color": "#94a3b8", "fontSize": "0.82rem", "marginBottom": "4px"},
-        ),
-    ], style=SIDEBAR_STYLE)
-
-    # ── KPI Row ──────────────────────────────────────────────────────────────
-    kpi_row = dbc.Row([
-        dbc.Col(stat_card("Total Patients",   "kpi-total",    "👥", "#dbeafe"), md=3),
-        dbc.Col(stat_card("High Risk",        "kpi-highrisk", "🔴", "#fee2e2"), md=3),
-        dbc.Col(stat_card("Avg BMI",          "kpi-avgbmi",   "⚖️", "#fef9c3"), md=3),
-        dbc.Col(stat_card("Avg Fasting Glu.", "kpi-avggluc",  "🩸", "#dcfce7"), md=3),
-    ], className="g-3 mb-4")
-
-    # ── Main feature chart ───────────────────────────────────────────────────
-    main_chart = dbc.Card([
-        dbc.CardHeader(
-            html.H6("Feature Distribution by Cluster", className="mb-0 fw-semibold"),
-            style={"backgroundColor": "white", "border": "none", "paddingTop": "1rem"}
-        ),
-        dbc.CardBody(dcc.Graph(id="main-graph", config={"displayModeBar": False}))
-    ], style=CARD_STYLE)
-
-    # ── Cluster composition ──────────────────────────────────────────────────
-    cluster_pie = dbc.Card([
-        dbc.CardHeader(html.H6("Cluster Size Distribution", className="mb-0 fw-semibold"),
-                       style={"backgroundColor": "white", "border": "none", "paddingTop": "1rem"}),
-        dbc.CardBody(dcc.Graph(id="cluster-pie", config={"displayModeBar": False}))
-    ], style=CARD_STYLE)
-
-    # ── Diabetes stage bar ───────────────────────────────────────────────────
-    stage_bar = dbc.Card([
-        dbc.CardHeader(html.H6("Diabetes Stage per Cluster", className="mb-0 fw-semibold"),
-                       style={"backgroundColor": "white", "border": "none", "paddingTop": "1rem"}),
-        dbc.CardBody(dcc.Graph(id="stage-bar", config={"displayModeBar": False}))
-    ], style=CARD_STYLE)
-
-    # ── Scatter matrix ───────────────────────────────────────────────────────
-    scatter_matrix = dbc.Card([
-        dbc.CardHeader(html.H6("Multi-Feature Scatter Explorer", className="mb-0 fw-semibold"),
-                       style={"backgroundColor": "white", "border": "none", "paddingTop": "1rem"}),
-        dbc.CardBody([
+            # Main charts row
             dbc.Row([
                 dbc.Col([
-                    html.Label("X Axis", style={"fontSize": "0.8rem", "color": "#64748b"}),
-                    dcc.Dropdown(id="scatter-x", value="bmi",
-                                 options=[
-                                     {"label": "BMI", "value": "bmi"},
-                                     {"label": "Age", "value": "age"},
-                                     {"label": "Fasting Glucose", "value": "glucose_fasting"},
-                                     {"label": "HbA1c", "value": "hba1c"},
-                                 ], clearable=False),
-                ], md=4),
-                dbc.Col([
-                    html.Label("Y Axis", style={"fontSize": "0.8rem", "color": "#64748b"}),
-                    dcc.Dropdown(id="scatter-y", value="hba1c",
-                                 options=[
-                                     {"label": "HbA1c", "value": "hba1c"},
-                                     {"label": "Fasting Glucose", "value": "glucose_fasting"},
-                                     {"label": "BMI", "value": "bmi"},
-                                     {"label": "Age", "value": "age"},
-                                 ], clearable=False),
-                ], md=4),
-            ], className="mb-3"),
-            dcc.Graph(id="scatter-plot", config={"displayModeBar": False})
-        ])
-    ], style=CARD_STYLE)
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Feature Distribution by Cluster",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([dcc.Graph(id="main-graph", config={"displayModeBar": False})]),
+                    ], style=CARD),
+                ], xs=12, lg=7, className="mb-4"),
 
-    # ── Risk Prediction Form ─────────────────────────────────────────────────
-    prediction_panel = dbc.Card([
-        dbc.CardHeader(html.H6("🤖 Real-Time Risk Prediction", className="mb-0 fw-semibold"),
-                       style={"backgroundColor": "white", "border": "none", "paddingTop": "1rem"}),
-        dbc.CardBody([
-            dbc.Row([
                 dbc.Col([
-                    html.Label("Age", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Slider(id="input-age", min=18, max=90, step=1, value=45,
-                               marks={18: "18", 45: "45", 90: "90"},
-                               tooltip={"placement": "bottom", "always_visible": True}),
-                ], md=6, className="mb-3"),
-                dbc.Col([
-                    html.Label("BMI", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Slider(id="input-bmi", min=15, max=55, step=0.5, value=27,
-                               marks={15: "15", 35: "35", 55: "55"},
-                               tooltip={"placement": "bottom", "always_visible": True}),
-                ], md=6, className="mb-3"),
-                dbc.Col([
-                    html.Label("Fasting Glucose (mg/dL)", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Slider(id="input-glucose", min=60, max=300, step=1, value=100,
-                               marks={60: "60", 180: "180", 300: "300"},
-                               tooltip={"placement": "bottom", "always_visible": True}),
-                ], md=6, className="mb-3"),
-                dbc.Col([
-                    html.Label("HbA1c (%)", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Slider(id="input-hba1c", min=4, max=14, step=0.1, value=5.5,
-                               marks={4: "4", 7: "7", 14: "14"},
-                               tooltip={"placement": "bottom", "always_visible": True}),
-                ], md=6, className="mb-3"),
-                dbc.Col([
-                    html.Label("Physical Activity (hrs/week)", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Slider(id="input-activity", min=0, max=20, step=0.5, value=5,
-                               marks={0: "0", 10: "10", 20: "20"},
-                               tooltip={"placement": "bottom", "always_visible": True}),
-                ], md=6, className="mb-3"),
-                dbc.Col([
-                    html.Label("Stress Level (1–10)", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Slider(id="input-stress", min=1, max=10, step=1, value=4,
-                               marks={1: "1", 5: "5", 10: "10"},
-                               tooltip={"placement": "bottom", "always_visible": True}),
-                ], md=6, className="mb-3"),
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Risk Score Distribution",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([dcc.Graph(id="risk-score-graph", config={"displayModeBar": False})]),
+                    ], style=CARD),
+                ], xs=12, lg=5, className="mb-4"),
             ]),
+
+            # Secondary charts
             dbc.Row([
                 dbc.Col([
-                    html.Label("Model", style={"fontSize": "0.82rem", "color": "#475569"}),
-                    dcc.Dropdown(
-                        id="model-selector",
-                        options=[
-                            {"label": "Random Forest", "value": "rf"},
-                            {"label": "XGBoost", "value": "xgb"},
-                        ],
-                        value="rf",
-                        clearable=False,
-                    ),
-                ], md=4),
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Cluster Composition",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([dcc.Graph(id="cluster-composition-graph", config={"displayModeBar": False})]),
+                    ], style=CARD),
+                ], xs=12, lg=5, className="mb-4"),
+
                 dbc.Col([
-                    dbc.Button("Run Prediction", id="predict-btn", color="primary",
-                               className="mt-4 w-100", style={"fontWeight": "600"}),
-                ], md=4),
-            ], className="mb-3"),
-            html.Div(id="prediction-output"),
-        ])
-    ], style=CARD_STYLE)
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Diabetes Stage Distribution",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([dcc.Graph(id="diabetes-stage-graph", config={"displayModeBar": False})]),
+                    ], style=CARD),
+                ], xs=12, lg=7, className="mb-4"),
+            ]),
 
-    # ── Cluster Summary Table ────────────────────────────────────────────────
-    cluster_table = dbc.Card([
-        dbc.CardHeader(html.H6("📋 Cluster Profile Summary", className="mb-0 fw-semibold"),
-                       style={"backgroundColor": "white", "border": "none", "paddingTop": "1rem"}),
-        dbc.CardBody(html.Div(id="cluster-table"))
-    ], style=CARD_STYLE)
+            # Model comparison table
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Model Performance Comparison",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([
+                            html.Div([
+                                html.Table([
+                                    html.Thead(html.Tr([
+                                        html.Th("Model", style={"width": "25%"}),
+                                        html.Th("Accuracy"),
+                                        html.Th("Precision"),
+                                        html.Th("Recall"),
+                                        html.Th("F1-Score"),
+                                    ], style={"background": C["navy"], "color": "#fff",
+                                              "fontSize": "13px", "textAlign": "center"})),
+                                    html.Tbody([
+                                        html.Tr([
+                                            html.Td("Decision Tree", style={"fontWeight": "600"}),
+                                            html.Td("84.2%"), html.Td("83.1%"),
+                                            html.Td("82.7%"), html.Td("82.9%"),
+                                        ], style={"textAlign": "center", "background": "#F7FAFC"}),
+                                        html.Tr([
+                                            html.Td("Random Forest", style={"fontWeight": "600"}),
+                                            html.Td("91.5%"), html.Td("90.8%"),
+                                            html.Td("91.2%"), html.Td("91.0%"),
+                                        ], style={"textAlign": "center"}),
+                                        html.Tr([
+                                            html.Td([
+                                                "XGBoost ",
+                                                dbc.Badge("Best", color="success", pill=True,
+                                                          style={"fontSize": "10px"}),
+                                            ], style={"fontWeight": "700"}),
+                                            html.Td("94.3%", style={"color": C["teal"], "fontWeight": "700"}),
+                                            html.Td("93.7%", style={"color": C["teal"], "fontWeight": "700"}),
+                                            html.Td("94.1%", style={"color": C["teal"], "fontWeight": "700"}),
+                                            html.Td("93.9%", style={"color": C["teal"], "fontWeight": "700"}),
+                                        ], style={"textAlign": "center", "background": "#F0FFF4"}),
+                                    ]),
+                                ], style={"width": "100%", "borderCollapse": "collapse",
+                                          "fontSize": "14px", "border": f"1px solid {C['border']}"}),
+                            ])
+                        ]),
+                    ], style=CARD),
+                ], xs=12, className="mb-4"),
+            ]),
 
-    # ── Page content ─────────────────────────────────────────────────────────
-    content = html.Div([
-        # Header
+        ], style={"padding": "24px 8px"}),
+    ])
+
+
+# TAB 2: Predictions
+def predictions_tab():
+    return dbc.Tab(label="🤖 Predictions", tab_id="tab-predictions",
+                   label_style=TAB_STYLE, active_label_style=TAB_SELECTED,
+                   children=[
         html.Div([
-            html.H4("Diabetes Risk Dashboard", className="fw-bold mb-1", style={"color": "#0f172a"}),
-            html.P("BC Analytics · CRISP-DM · XGBoost & Random Forest · K-Means Segmentation",
-                   style={"color": "#64748b", "fontSize": "0.85rem"}),
-        ], className="mb-4"),
+            dbc.Row([
+                # Input form 
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(
+                            html.Span("Patient Data Input",
+                                      style={"fontWeight": "700", "color": C["navy"], "fontSize": "15px"}),
+                            style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}
+                        ),
+                        dbc.CardBody([
+                            html.P("Enter the patient's clinical measurements below and click Predict.",
+                                   style={"color": C["slate"], "fontSize": "13px", "marginBottom": "20px"}),
 
-        kpi_row,
+                            dbc.Row([
+                                labelled_input("Age", "input-age", "e.g. 45", 1, 120,
+                                               tooltip_text="Patient's age in years", unit="yrs"),
+                                labelled_input("BMI", "input-bmi", "e.g. 27.5", 10, 60, step=0.1,
+                                               tooltip_text="Body Mass Index (weight kg / height m²)", unit="kg/m²"),
+                                labelled_input("Glucose (Fasting)", "input-glucose-fasting", "e.g. 110", 50, 500,
+                                               tooltip_text="Fasting blood glucose level", unit="mg/dL"),
+                            ]),
+                            dbc.Row([
+                                labelled_input("Glucose (Postprandial)", "input-glucose-postprandial",
+                                               "e.g. 140", 50, 600,
+                                               tooltip_text="Blood glucose 2 hours after eating", unit="mg/dL"),
+                                labelled_input("Systolic BP", "input-systolic-bp", "e.g. 120", 80, 200,
+                                               tooltip_text="Top number of blood pressure reading", unit="mmHg"),
+                                labelled_input("Diastolic BP", "input-diastolic-bp", "e.g. 80", 40, 150,
+                                               tooltip_text="Bottom number of blood pressure reading", unit="mmHg"),
+                            ]),
+                            dbc.Row([
+                                labelled_input("Cholesterol (Total)", "input-cholesterol", "e.g. 190", 100, 400,
+                                               tooltip_text="Total blood cholesterol level", unit="mg/dL"),
+                                labelled_input("HbA1c", "input-hba1c", "e.g. 6.5", 4, 15, step=0.1,
+                                               tooltip_text="3-month average blood sugar level", unit="%"),
+                                labelled_input("Physical Activity", "input-activity", "e.g. 150", 0, 1000,
+                                               tooltip_text="Minutes of moderate exercise per week", unit="min/wk"),
+                            ]),
 
-        dbc.Row([
-            dbc.Col(main_chart, md=8),
-            dbc.Col(cluster_pie, md=4),
-        ], className="g-3 mb-4"),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Button([
+                                        dbc.Spinner(size="sm", id="predict-spinner", spinner_style={"display": "none"}),
+                                        " ⚡  Predict Diabetes Risk"
+                                    ],
+                                        id="predict-button",
+                                        n_clicks=0,
+                                        color="primary",
+                                        className="w-100 fw-bold",
+                                        style={"background": C["teal"], "border": "none",
+                                               "borderRadius": "10px", "padding": "12px",
+                                               "fontSize": "15px", "letterSpacing": "0.5px"},
+                                    ),
+                                ], xs=12, sm=8, lg=6, className="mx-auto"),
+                            ]),
+                        ]),
+                    ], style=CARD),
+                ], xs=12, lg=7, className="mb-4"),
 
-        dbc.Row([
-            dbc.Col(stage_bar, md=6),
-            dbc.Col(scatter_matrix, md=6),
-        ], className="g-3 mb-4"),
+                # Results panel 
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(
+                            html.Span("Prediction Results",
+                                      style={"fontWeight": "700", "color": C["navy"], "fontSize": "15px"}),
+                            style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}
+                        ),
+                        dbc.CardBody([
+                            html.Div([
+                                html.Div("🔬", style={"fontSize": "52px", "textAlign": "center",
+                                                      "marginBottom": "10px"}),
+                                html.P("Fill in the patient data and click Predict to see results.",
+                                       style={"color": C["slate"], "textAlign": "center",
+                                              "fontSize": "14px"}),
+                            ], id="prediction-output"),
+                        ], style={"minHeight": "220px", "display": "flex",
+                                  "alignItems": "center", "justifyContent": "center"}),
+                    ], style=CARD),
 
-        dbc.Row([
-            dbc.Col(prediction_panel, md=12),
-        ], className="g-3 mb-4"),
+                    # Feature importance after prediction
+                    dbc.Card([
+                        dbc.CardHeader(
+                            html.Span("Feature Importance (XGBoost)",
+                                      style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                            style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}",
+                                   "marginTop": "16px"}
+                        ),
+                        dbc.CardBody([dcc.Graph(id="feature-importance-graph",
+                                                config={"displayModeBar": False})]),
+                    ], style={**CARD, "marginTop": "16px"}),
+                ], xs=12, lg=5, className="mb-4"),
+            ]),
 
-        dbc.Row([
-            dbc.Col(cluster_table, md=12),
-        ], className="g-3 mb-4"),
+            # SHAP row
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(
+                            html.Span("SHAP Explanation – Individual Prediction",
+                                      style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                            style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}
+                        ),
+                        dbc.CardBody([
+                            dbc.Row([
+                                dbc.Col([html.Div(id="shap-summary")], xs=12, lg=5),
+                                dbc.Col([html.Div(id="shap-force-plot")], xs=12, lg=7),
+                            ])
+                        ]),
+                    ], style=CARD),
+                ], xs=12, className="mb-4"),
+            ]),
 
-    ], style=CONTENT_STYLE)
+        ], style={"padding": "24px 8px"}),
+    ])
 
-    return html.Div([sidebar, content])
+
+# TAB 3: Clustering & Segmentation 
+def clustering_tab():
+    return dbc.Tab(label="🔍 Clustering", tab_id="tab-clustering",
+                   label_style=TAB_STYLE, active_label_style=TAB_SELECTED,
+                   children=[
+        html.Div([
+            dbc.Row([
+                dbc.Col([
+                    section_heading("K-Means Patient Segmentation",
+                                    "Unsupervised clustering groups patients into risk profiles based on their clinical measurements."),
+                ], xs=12),
+            ]),
+
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Cluster Scatter Plot",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([dcc.Graph(id="cluster-scatter-graph", config={"displayModeBar": False})]),
+                    ], style=CARD),
+                ], xs=12, lg=8, className="mb-4"),
+
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Cluster Profiles",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([html.Div(id="cluster-profiles")]),
+                    ], style={**CARD, "height": "100%"}),
+                ], xs=12, lg=4, className="mb-4"),
+            ]),
+
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Cluster Feature Heatmap",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([dcc.Graph(id="cluster-heatmap", config={"displayModeBar": False})]),
+                    ], style=CARD),
+                ], xs=12, className="mb-4"),
+            ]),
+
+        ], style={"padding": "24px 8px"}),
+    ])
+
+
+# TAB 4: Documentation
+def documentation_tab():
+    def info_card(icon, title, points):
+        return dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.Span(icon, style={"fontSize": "28px", "marginRight": "10px"}),
+                        html.H6(title, style={"display": "inline", "fontWeight": "700",
+                                              "color": C["navy"], "fontSize": "15px"}),
+                    ], className="mb-3"),
+                    html.Ul([
+                        html.Li(p, style={"color": C["slate"], "fontSize": "13px",
+                                          "marginBottom": "6px", "lineHeight": "1.5"})
+                        for p in points
+                    ], style={"paddingLeft": "18px"}),
+                ])
+            ], style={**CARD, "height": "100%"}),
+        ], xs=12, lg=4, className="mb-4")
+
+    return dbc.Tab(label="📄 Documentation", tab_id="tab-docs",
+                   label_style=TAB_STYLE, active_label_style=TAB_SELECTED,
+                   children=[
+        html.Div([
+            dbc.Row([
+                dbc.Col([
+                    section_heading("Project Documentation",
+                                    "A concise overview of the dataset, preparation pipeline, and models used in this system."),
+                ], xs=12),
+            ]),
+
+            dbc.Row([
+                info_card("🗃️", "Dataset", [
+                    "Synthetic clinical dataset simulating real-world patient health records.",
+                    "Features include demographics (age, BMI), blood work (glucose, HbA1c, cholesterol), and lifestyle metrics.",
+                    "Target variable: diagnosed_diabetes (binary) and diabetes_stage (categorical).",
+                    "Size: several thousand rows — balanced class distribution applied.",
+                ]),
+                info_card("⚙️", "Data Preparation", [
+                    "Missing values handled via median imputation for numeric features.",
+                    "Outlier removal using IQR clipping on key clinical features.",
+                    "StandardScaler applied to normalise feature distributions before modelling.",
+                    "Label encoding used for categorical targets; processed data saved as a reusable pipeline.",
+                ]),
+                info_card("🤖", "Models Used", [
+                    "Decision Tree — interpretable baseline; prone to overfitting.",
+                    "Random Forest — ensemble of trees; high accuracy with less overfitting.",
+                    "XGBoost — gradient boosting; best overall performance (≈94% accuracy).",
+                    "K-Means Clustering (k=3) — unsupervised patient segmentation into risk groups.",
+                    "SHAP (SHapley Additive Explanations) — used to explain individual predictions.",
+                ]),
+            ]),
+
+            # Workflow diagram (static)
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("End-to-End Workflow",
+                                    style={"color": C["navy"], "fontWeight": "700", "marginBottom": "16px"}),
+                            html.Div([
+                                html.Div([
+                                    html.Div(step, style={
+                                        "background": C["teal"] if i % 2 == 0 else C["navy"],
+                                        "color": "#fff", "borderRadius": "10px",
+                                        "padding": "10px 20px", "fontSize": "13px",
+                                        "fontWeight": "600", "textAlign": "center",
+                                        "minWidth": "140px",
+                                    })
+                                    for i, step in enumerate([
+                                        "Raw Data", "Clean & Scale", "Feature Engineering",
+                                        "Model Training", "Evaluation", "Dashboard",
+                                    ])
+                                ], style={"display": "flex", "gap": "6px",
+                                          "alignItems": "center", "justifyContent": "center",
+                                          "flexWrap": "wrap"}),
+                            ]),
+                        ])
+                    ], style=CARD),
+                ], xs=12, className="mb-4"),
+            ]),
+
+            # Metric definitions
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.Span("Key Metric Definitions",
+                                                  style={"fontWeight": "700", "color": C["navy"], "fontSize": "14px"}),
+                                       style={"background": "#F7FAFC", "borderBottom": f"1px solid {C['border']}"}),
+                        dbc.CardBody([
+                            html.Table([
+                                html.Thead(html.Tr([
+                                    html.Th("Metric"), html.Th("Formula / Meaning"),
+                                ], style={"background": C["navy"], "color": "#fff", "fontSize": "13px"})),
+                                html.Tbody([
+                                    html.Tr([html.Td("Accuracy"),  html.Td("(TP + TN) / All — overall correct predictions")],
+                                            style={"background": "#F7FAFC"}),
+                                    html.Tr([html.Td("Precision"), html.Td("TP / (TP + FP) — of predicted positives, how many are correct")]),
+                                    html.Tr([html.Td("Recall"),    html.Td("TP / (TP + FN) — of actual positives, how many were found")],
+                                            style={"background": "#F7FAFC"}),
+                                    html.Tr([html.Td("F1-Score"),  html.Td("Harmonic mean of Precision & Recall — balanced measure")]),
+                                    html.Tr([html.Td("SHAP Value"), html.Td("Each feature's contribution to moving the prediction from the base value")],
+                                            style={"background": "#F7FAFC"}),
+                                ]),
+                            ], style={"width": "100%", "fontSize": "13px",
+                                      "borderCollapse": "collapse", "border": f"1px solid {C['border']}"}),
+                        ]),
+                    ], style=CARD),
+                ], xs=12, className="mb-4"),
+            ]),
+
+        ], style={"padding": "24px 8px"}),
+    ])
+
+
+# Master Layout
+def create_layout():
+    return html.Div([
+
+        # Google Font
+        html.Link(rel="stylesheet",
+                  href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&display=swap"),
+
+        # Header 
+        html.Div([
+            dbc.Container([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Span("🏥", style={"fontSize": "36px", "marginRight": "14px"}),
+                            html.Div([
+                                html.H1("Diabetes Risk Dashboard",
+                                        style={"color": "#fff", "fontFamily": "'Nunito Sans', sans-serif",
+                                               "fontWeight": "800", "fontSize": "26px", "margin": "0",
+                                               "letterSpacing": "-0.5px"}),
+                                html.P("Patient Segmentation & Risk Analysis System",
+                                       style={"color": "#A8D5CF", "margin": "0",
+                                              "fontSize": "13px", "fontWeight": "500"}),
+                            ]),
+                        ], style={"display": "flex", "alignItems": "center"}),
+                    ], xs=12, md=8),
+                    dbc.Col([
+                        html.Div([
+                            dbc.Badge("XGBoost Powered", color="light", text_color="dark",
+                                      pill=True,
+                                      style={"fontSize": "12px", "marginRight": "8px",
+                                             "fontFamily": "'Nunito Sans', sans-serif"}),
+                            dbc.Badge("K-Means Clustering", color="light", text_color="dark",
+                                      pill=True,
+                                      style={"fontSize": "12px",
+                                             "fontFamily": "'Nunito Sans', sans-serif"}),
+                        ], style={"textAlign": "right"}),
+                    ], xs=12, md=4, className="d-none d-md-flex align-items-center justify-content-end"),
+                ])
+            ], fluid=True),
+        ], style=HEADER_STYLE),
+
+        # Tabs
+        dbc.Container([
+            dcc.Tabs(
+                id="main-tabs",
+                value="tab-overview",
+                children=[
+                    overview_tab(),
+                    predictions_tab(),
+                    clustering_tab(),
+                    documentation_tab(),
+                ],
+                style={"marginTop": "0", "borderBottom": f"2px solid {C['border']}"},
+                content_style={"background": C["light"]},
+            ),
+        ], fluid=True, style={"padding": "0"}),
+
+        # Footer 
+        html.Div([
+            html.P("Diabetes Risk Segmentation & Decision Support System · Healthcare Analytics Dashboard",
+                   style={"textAlign": "center", "color": "#A0AEC0", "fontSize": "12px",
+                           "margin": "0", "fontFamily": "'Nunito Sans', sans-serif"}),
+        ], style={"background": C["navy"], "padding": "16px", "marginTop": "8px"}),
+
+    ], style={"fontFamily": "'Nunito Sans', sans-serif",
+              "background": C["light"], "minHeight": "100vh"})
