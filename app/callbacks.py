@@ -64,11 +64,110 @@ FEATURE_NAMES = [
     "Age", "BMI", "Glucose (Fasting)", "Glucose (Postprandial)",
     "Systolic BP", "Diastolic BP", "Cholesterol", "HbA1c", "Physical Activity",
 ]
+
+# The 9 columns collected from the UI form
 INPUT_COLS = [
     "age", "bmi", "glucose_fasting", "glucose_postprandial",
     "systolic_bp", "diastolic_bp", "cholesterol_total",
     "hba1c", "physical_activity_minutes_per_week",
 ]
+
+# ALL numeric columns the preprocessor was trained on (from feature_names.csv)
+ALL_NUMERIC_COLS = [
+    "age", "alcohol_consumption_per_week", "physical_activity_minutes_per_week",
+    "diet_score", "sleep_hours_per_day", "screen_time_hours_per_day",
+    "family_history_diabetes", "hypertension_history", "cardiovascular_history",
+    "bmi", "waist_to_hip_ratio", "systolic_bp", "diastolic_bp", "heart_rate",
+    "cholesterol_total", "hdl_cholesterol", "ldl_cholesterol", "triglycerides",
+    "glucose_fasting", "glucose_postprandial", "insulin_level", "hba1c",
+    "diabetes_risk_score"
+]
+
+# ALL categorical columns the preprocessor was trained on
+ALL_CAT_COLS = [
+    "gender", "ethnicity", "education_level", "income_level",
+    "employment_status", "smoking_status",
+    "age_group", "bmi_category", "bp_category",   # engineered
+]
+
+# Sensible population-median defaults for columns not on the input form
+COL_DEFAULTS = {
+    "alcohol_consumption_per_week": 2.0,
+    "diet_score": 5.0,
+    "sleep_hours_per_day": 7.0,
+    "screen_time_hours_per_day": 4.0,
+    "family_history_diabetes": 0,
+    "hypertension_history": 0,
+    "cardiovascular_history": 0,
+    "waist_to_hip_ratio": 0.85,
+    "heart_rate": 72.0,
+    "hdl_cholesterol": 50.0,
+    "ldl_cholesterol": 100.0,
+    "triglycerides": 150.0,
+    "insulin_level": 10.0,
+    "diabetes_risk_score": 0,
+    # categorical defaults (most common category)
+    "gender": "Male",
+    "ethnicity": "White",
+    "education_level": "Highschool",
+    "income_level": "Middle",
+    "employment_status": "Employed",
+    "smoking_status": "Never",
+}
+
+
+def _apply_feature_engineering(row: dict) -> dict:
+    """Mirror data_preprocessing.engineer_features for a single dict row."""
+    age = row.get("age", 30)
+    if age <= 30:
+        row["age_group"] = "Young"
+    elif age <= 45:
+        row["age_group"] = "Middle-aged"
+    elif age <= 60:
+        row["age_group"] = "Senior"
+    else:
+        row["age_group"] = "Elderly"
+
+    bmi = row.get("bmi", 22)
+    if bmi < 18.5:
+        row["bmi_category"] = "Underweight"
+    elif bmi < 25:
+        row["bmi_category"] = "Normal"
+    elif bmi < 30:
+        row["bmi_category"] = "Overweight"
+    else:
+        row["bmi_category"] = "Obese"
+
+    sbp = row.get("systolic_bp", 120)
+    dbp = row.get("diastolic_bp", 80)
+    if sbp >= 140 or dbp >= 90:
+        row["bp_category"] = "Hypertension"
+    elif sbp >= 120 or dbp >= 80:
+        row["bp_category"] = "Prehypertension"
+    else:
+        row["bp_category"] = "Normal"
+
+    return row
+
+
+def _build_full_input(vals: list) -> pd.DataFrame:
+    """
+    Build a single-row DataFrame that matches exactly what the preprocessor
+    expects: all numeric + categorical columns including engineered features.
+    """
+    row = dict(zip(INPUT_COLS, vals))
+
+    # Fill every missing column with its default
+    for col in ALL_NUMERIC_COLS + ALL_CAT_COLS:
+        if col not in row:
+            row[col] = COL_DEFAULTS.get(col, 0)
+
+    # Apply the same feature engineering as data_preprocessing.py
+    row = _apply_feature_engineering(row)
+
+    # Ensure column order matches: numerics first, then categoricals
+    ordered_cols = ALL_NUMERIC_COLS + ALL_CAT_COLS
+    return pd.DataFrame([{c: row[c] for c in ordered_cols}])
 
 
 def register_callbacks(app):
@@ -221,7 +320,7 @@ def register_callbacks(app):
                        style={"color": C["amber"], "textAlign": "center",
                               "fontWeight": "600", "marginTop": "10px"}),
             ])
-
+        
         if xgb_model is None:
             return html.Div([
                 html.P("❌ Model not loaded. Please check server logs.",
@@ -229,20 +328,37 @@ def register_callbacks(app):
             ])
 
         try:
-            input_data = pd.DataFrame([dict(zip(INPUT_COLS, vals))])
+            input_data   = _build_full_input(vals)
             input_scaled = preprocessor.transform(input_data)
-            prediction = xgb_model.predict(input_scaled)[0]
-            proba = xgb_model.predict_proba(input_scaled)[0]
+            prediction   = xgb_model.predict(input_scaled)[0]
+            proba        = xgb_model.predict_proba(input_scaled)[0]
 
+            #test
+            print(dict(zip(label_encoder.classes_, proba)))
+            
             cluster = kmeans_model.predict(input_scaled)[0] if kmeans_model else "N/A"
 
-            is_high = prediction == 1
-            risk_pct = proba[1] * 100
-            conf_pct = risk_pct if is_high else proba[0] * 100
+            # Decode predicted class and compute risk correctly for 2- or 3-class models.
+            # sklearn LabelEncoder sorts alphabetically:
+            #   2-class: No Diabetes=0, Type 2=1
+            #   3-class: No Diabetes=0, Pre-Diabetes=1, Type 2=2
+            # In both cases class 0 = healthy, any class > 0 = elevated risk.
+            if label_encoder is not None:
+                predicted_label = label_encoder.inverse_transform([prediction])[0]
+            else:
+                predicted_label = str(prediction)
+            
+            no_diabetes_index = list(label_encoder.classes_).index("No Diabetes")
+            
+            is_high  = int(prediction) > 0
+            # "Diabetes probability" = probability of NOT being in the healthy class
+            risk_pct = (1.0 - float(proba[no_diabetes_index])) * 100
+            # Confidence = how sure the model is about the specific predicted class
+            conf_pct = float(proba[int(prediction)]) * 100
 
             bar_color = C["red"] if is_high else C["teal"]
             icon  = "🔴" if is_high else "🟢"
-            label = "HIGH RISK" if is_high else "LOW RISK"
+            label = predicted_label   # e.g. "Type 2", "Pre-Diabetes", "No Diabetes"
 
             return html.Div([
                 # Risk badge
@@ -281,7 +397,7 @@ def register_callbacks(app):
                     dbc.Col([
                         html.Small("Risk Score", style={"color": C["slate"], "fontSize": "11px",
                                                          "fontWeight": "700", "textTransform": "uppercase"}),
-                        html.Div(f"{proba[1]:.3f}", style={"color": C["navy"], "fontWeight": "800",
+                        html.Div(f"{risk_pct/100:.3f}", style={"color": C["navy"], "fontWeight": "800",
                                                             "fontSize": "20px"}),
                     ], style={"textAlign": "center"}),
                     dbc.Col([
@@ -298,6 +414,7 @@ def register_callbacks(app):
                 html.P(f"❌ Prediction error: {str(e)}",
                        style={"color": C["red"], "fontWeight": "600", "textAlign": "center"}),
             ])
+    
 
     # Feature importance char
     @app.callback(
@@ -312,7 +429,23 @@ def register_callbacks(app):
             return fig
         try:
             imp = xgb_model.feature_importances_
-            imp_df = pd.DataFrame({"Feature": FEATURE_NAMES, "Importance": imp}).sort_values("Importance")
+
+            # Use real preprocessor feature names if available, else fall back to indices
+            if preprocessor is not None:
+                try:
+                    feat_labels = list(preprocessor.get_feature_names_out())
+                except Exception:
+                    feat_labels = [f"feature_{i}" for i in range(len(imp))]
+            else:
+                feat_labels = [f"feature_{i}" for i in range(len(imp))]
+
+            imp_df = (
+                pd.DataFrame({"Feature": feat_labels, "Importance": imp})
+                .sort_values("Importance")
+                .tail(15)   # show top 15 to keep the chart readable
+            )
+            # Tidy up sklearn's "num__" / "cat__" prefixes for display
+            imp_df["Feature"] = imp_df["Feature"].str.replace(r"^(num|cat)__", "", regex=True).str.replace("_", " ").str.title()
             fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
                          title="XGBoost Feature Importance",
                          color="Importance",
@@ -370,12 +503,13 @@ def register_callbacks(app):
 
         try:
             import shap
-            input_data = pd.DataFrame([dict(zip(INPUT_COLS, vals))])
+            input_data   = _build_full_input(vals)
             input_scaled = preprocessor.transform(input_data)
             explainer  = shap.TreeExplainer(xgb_model)
             shap_vals  = explainer.shap_values(input_scaled)
             base_val   = explainer.expected_value
-            pred_val   = xgb_model.predict_proba(input_scaled)[0][1]
+            # P(not healthy) = 1 - P(No Diabetes / class 0) — correct for 2 or 3 classes
+            pred_val   = 1.0 - float(xgb_model.predict_proba(input_scaled)[0][0])
 
             rows = sorted(zip(FEATURE_NAMES, shap_vals[0]), key=lambda x: abs(x[1]), reverse=True)
 
@@ -501,3 +635,5 @@ def register_callbacks(app):
             fig = go.Figure()
             fig.add_annotation(text=f"Error: {e}", showarrow=False)
             return fig
+        
+        
