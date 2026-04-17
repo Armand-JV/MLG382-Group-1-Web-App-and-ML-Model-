@@ -14,6 +14,17 @@ C = {
     "border": "#E2E8F0",
 }
 
+DEBUG_DEFAULT_INPUTS = {
+    "input-age": 24,
+    "input-bmi": 22,
+    "input-glucose-fasting": 90,
+    "input-glucose-postprandial": 120,
+    "input-systolic-bp": 110,
+    "input-diastolic-bp": 70,
+    "input-cholesterol": 170,
+    "input-hba1c": 5.2,
+    "input-activity": 180,
+}
 # Shared style helpers
 CARD = {
     "borderRadius": "14px",
@@ -81,7 +92,7 @@ def section_heading(text, sub=None):
 
 # Helper: labelled input
 def labelled_input(label, input_id, placeholder, min_val, max_val,
-                   step=1, tooltip_text=None, unit=""):
+                   step=1, tooltip_text=None, unit="", default_value=None):
     tip = []
     if tooltip_text:
         tip = [
@@ -93,9 +104,11 @@ def labelled_input(label, input_id, placeholder, min_val, max_val,
                    style={"fontSize": "13px", "color": C["slate"]}),
         dbc.InputGroup([
             dcc.Input(
+                
                 id=input_id,
                 type="number",
                 placeholder=placeholder,
+                value=default_value,
                 min=min_val,
                 max=max_val,
                 step=step,
@@ -298,28 +311,37 @@ def predictions_tab():
 
                             dbc.Row([
                                 labelled_input("Age", "input-age", "e.g. 45", 1, 120,
-                                               tooltip_text="Patient's age in years", unit="yrs"),
+                                               tooltip_text="Patient's age in years", unit="yrs",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-age"]),
                                 labelled_input("BMI", "input-bmi", "e.g. 27.5", 10, 60, step=0.1,
-                                               tooltip_text="Body Mass Index (weight kg / height m²)", unit="kg/m²"),
+                                               tooltip_text="Body Mass Index (weight kg / height m²)", unit="kg/m²",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-bmi"]),
                                 labelled_input("Glucose (Fasting)", "input-glucose-fasting", "e.g. 110", 50, 500,
-                                               tooltip_text="Fasting blood glucose level", unit="mg/dL"),
+                                               tooltip_text="Fasting blood glucose level", unit="mg/dL",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-glucose-fasting"]),
                             ]),
                             dbc.Row([
                                 labelled_input("Glucose (Postprandial)", "input-glucose-postprandial",
                                                "e.g. 140", 50, 600,
-                                               tooltip_text="Blood glucose 2 hours after eating", unit="mg/dL"),
+                                               tooltip_text="Blood glucose 2 hours after eating", unit="mg/dL",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-glucose-postprandial"]),
                                 labelled_input("Systolic BP", "input-systolic-bp", "e.g. 120", 80, 200,
-                                               tooltip_text="Top number of blood pressure reading", unit="mmHg"),
+                                               tooltip_text="Top number of blood pressure reading", unit="mmHg",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-systolic-bp"]),
                                 labelled_input("Diastolic BP", "input-diastolic-bp", "e.g. 80", 40, 150,
-                                               tooltip_text="Bottom number of blood pressure reading", unit="mmHg"),
+                                               tooltip_text="Bottom number of blood pressure reading", unit="mmHg",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-diastolic-bp"]),
                             ]),
                             dbc.Row([
                                 labelled_input("Cholesterol (Total)", "input-cholesterol", "e.g. 190", 100, 400,
-                                               tooltip_text="Total blood cholesterol level", unit="mg/dL"),
+                                               tooltip_text="Total blood cholesterol level", unit="mg/dL",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-cholesterol"]),
                                 labelled_input("HbA1c", "input-hba1c", "e.g. 6.5", 4, 15, step=0.1,
-                                               tooltip_text="3-month average blood sugar level", unit="%"),
+                                               tooltip_text="3-month average blood sugar level", unit="%",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-hba1c"]),
                                 labelled_input("Physical Activity", "input-activity", "e.g. 150", 0, 1000,
-                                               tooltip_text="Minutes of moderate exercise per week", unit="min/wk"),
+                                               tooltip_text="Minutes of moderate exercise per week", unit="min/wk",
+                                               default_value=DEBUG_DEFAULT_INPUTS["input-activity"]),
                             ]),
 
                             dbc.Row([
