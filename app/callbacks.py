@@ -80,7 +80,7 @@ ALL_NUMERIC_COLS = [
     "bmi", "waist_to_hip_ratio", "systolic_bp", "diastolic_bp", "heart_rate",
     "cholesterol_total", "hdl_cholesterol", "ldl_cholesterol", "triglycerides",
     "glucose_fasting", "glucose_postprandial", "insulin_level", "hba1c",
-    "diabetes_risk_score",
+    "diabetes_risk_score"
 ]
 
 # ALL categorical columns the preprocessor was trained on
@@ -105,7 +105,7 @@ COL_DEFAULTS = {
     "ldl_cholesterol": 100.0,
     "triglycerides": 150.0,
     "insulin_level": 10.0,
-    "diabetes_risk_score": 0.5,
+    "diabetes_risk_score": 0,
     # categorical defaults (most common category)
     "gender": "Male",
     "ethnicity": "White",
@@ -320,7 +320,7 @@ def register_callbacks(app):
                        style={"color": C["amber"], "textAlign": "center",
                               "fontWeight": "600", "marginTop": "10px"}),
             ])
-
+        
         if xgb_model is None:
             return html.Div([
                 html.P("❌ Model not loaded. Please check server logs.",
@@ -333,6 +333,9 @@ def register_callbacks(app):
             prediction   = xgb_model.predict(input_scaled)[0]
             proba        = xgb_model.predict_proba(input_scaled)[0]
 
+            #test
+            print(dict(zip(label_encoder.classes_, proba)))
+            
             cluster = kmeans_model.predict(input_scaled)[0] if kmeans_model else "N/A"
 
             # Decode predicted class and compute risk correctly for 2- or 3-class models.
@@ -344,10 +347,12 @@ def register_callbacks(app):
                 predicted_label = label_encoder.inverse_transform([prediction])[0]
             else:
                 predicted_label = str(prediction)
-
+            
+            no_diabetes_index = list(label_encoder.classes_).index("No Diabetes")
+            
             is_high  = int(prediction) > 0
             # "Diabetes probability" = probability of NOT being in the healthy class
-            risk_pct = (1.0 - float(proba[0])) * 100
+            risk_pct = (1.0 - float(proba[no_diabetes_index])) * 100
             # Confidence = how sure the model is about the specific predicted class
             conf_pct = float(proba[int(prediction)]) * 100
 
@@ -409,6 +414,7 @@ def register_callbacks(app):
                 html.P(f"❌ Prediction error: {str(e)}",
                        style={"color": C["red"], "fontWeight": "600", "textAlign": "center"}),
             ])
+    
 
     # Feature importance char
     @app.callback(
@@ -629,3 +635,5 @@ def register_callbacks(app):
             fig = go.Figure()
             fig.add_annotation(text=f"Error: {e}", showarrow=False)
             return fig
+        
+        
